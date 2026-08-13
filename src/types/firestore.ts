@@ -24,7 +24,7 @@ export interface Endereco {
 }
 
 export interface Patient {
-  patientID: string;
+  patientID:patient.patientID,
   'nome completo': string;
   'nome do responsável': string;
   sexo: 'menino' | 'menina';
