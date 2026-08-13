@@ -131,8 +131,8 @@ export async function repetirUltimoLaudo(
   idade: patient.idade,
   'data de nascimento': patient['data de nascimento'] instanceof Timestamp
     ? patient['data de nascimento']
-    : patient['data de nascimento'].toDate(),
-  }, doctorUid, appointmentId);
+    : new Date(patient['data de nascimento']._seconds * 1000),
+}, doctorUid, appointmentId);
   return {
     tipo: 'laudo',
     dados: novo,
