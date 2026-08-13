@@ -3,7 +3,6 @@
 // Dr. Diego Funahashi Alves - Neurologia Pediátrica
 // ============================================================================
 import { Timestamp } from 'firebase/firestore';
-import { Timestamp } from 'firebase/firestore';
 import type { Receita, Laudo, Patient, Agendamento } from '@/types/firestore';
 import { buscarUltimaReceita, clonarUltimaReceita, prepararReceitaDoPaciente } from './receitas';
 import { buscarUltimoLaudo, clonarUltimoLaudo, prepararLaudoDoPaciente } from './laudos';
