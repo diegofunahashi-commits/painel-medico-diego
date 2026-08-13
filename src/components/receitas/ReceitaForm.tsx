@@ -114,7 +114,7 @@ export default function ReceitaForm({ patient, receitaInicial, onSalvo, onCancel
       dose: `${dbMed.dosePadrao} ${dbMed.unidade} → ${doseCalculada}`,
       posologia: posologia,
       pesoReferencia: pesoAtual,
-      frequencia: dbMed.frequencia.includes('12') ? 2 : 1,
+      frequencia: dbMed.frequencia.includes('12') ? "2" : "1",
     };
     setMedicamentos(novos);
     toast.success(`Dose calculada: ${doseCalculada}`);
