@@ -52,6 +52,7 @@ export interface MedicacaoReceita {
   via: string;
   frequencia: string;
   posologia: string;
+  pesoReferencia: number;
 }
 
 export interface Receita {
