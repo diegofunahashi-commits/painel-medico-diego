@@ -53,6 +53,7 @@ export interface MedicacaoReceita {
   frequencia: string;
   posologia: string;
   pesoReferencia: number;
+  apresentacao: string;
 }
 
 export interface Receita {
