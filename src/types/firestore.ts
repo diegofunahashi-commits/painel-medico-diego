@@ -51,6 +51,7 @@ export interface MedicacaoReceita {
   dose: string;
   via: string;
   frequencia: string;
+  posologia: string;
 }
 
 export interface Receita {
