@@ -54,6 +54,7 @@ export interface MedicacaoReceita {
   posologia: string;
   pesoReferencia: number;
   apresentacao: string;
+  observacoes: string;
 }
 
 export interface Receita {
