@@ -2,7 +2,7 @@
 // HISTÓRICO COMBINADO - CLONAR/REPETIR RECEITAS E LAUDOS
 // Dr. Diego Funahashi Alves - Neurologia Pediátrica
 // ============================================================================
-
+import { Timestamp } from 'firebase/firestore';
 import { Timestamp } from 'firebase/firestore';
 import type { Receita, Laudo, Patient, Agendamento } from '@/types/firestore';
 import { buscarUltimaReceita, clonarUltimaReceita, prepararReceitaDoPaciente } from './receitas';
@@ -118,28 +118,32 @@ export async function repetirUltimoLaudo(
   const clonado = await clonarUltimoLaudo(patient.patientID, doctorUid);
 
   if (clonado) {
-    return {
-      tipo: 'laudo',
-      dados: clonado,
-      mensagem: `Último laudo carregado com ${clonado.cidCodes.length} diagnóstico(s). Revise o texto antes de salvar.`,
-    };
-  }
-
-  // Sem histórico: prepara do zero
-  const novo = prepararLaudoDoPaciente({
-  patientID: patient.patientID,
-  idade: patient.idade,
-  'data de nascimento': patient['data de nascimento'] instanceof Timestamp
-    ? patient['data de nascimento']
-    : new Date(patient['data de nascimento']._seconds * 1000),
-}, doctorUid, appointmentId);
   return {
     tipo: 'laudo',
-    dados: novo,
-    mensagem: 'Nenhum laudo anterior encontrado. Formulário iniciado com dados do paciente.',
+    dados: clonado,
+    mensagem: `Último laudo carregado com ${clonado.cidCodes.length} diagnóstico(s). Revise o texto antes de salvar.`,
   };
 }
 
+// Sem histórico: prepara do zero
+const novo = prepararLaudoDoPaciente({
+  patientID: patient.patientID,
+  idade: patient.idade,
+
+  'data de nascimento':
+    patient['data de nascimento'] instanceof Timestamp
+      ? patient['data de nascimento']
+      : Timestamp.fromDate(
+          new Date(patient['data de nascimento']._seconds * 1000)
+        ),
+
+}, doctorUid, appointmentId);
+
+return {
+  tipo: 'laudo',
+  dados: novo,
+  mensagem: 'Nenhum laudo anterior encontrado. Formulário iniciado com dados do paciente.',
+};
 // ---------------------------------------------------------------------------
 // CLONAR POR ID ESPECÍFICO (MODAL DE HISTÓRICO)
 // ---------------------------------------------------------------------------
