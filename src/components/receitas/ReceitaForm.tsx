@@ -65,6 +65,7 @@ export default function ReceitaForm({ patient, receitaInicial, onSalvo, onCancel
       frequencia: '',
       posologia: '',      
       pesoReferencia: 0,
+      apresentacao: ''
     }]);
   };
 
