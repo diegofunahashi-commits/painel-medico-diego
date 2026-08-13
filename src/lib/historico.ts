@@ -126,7 +126,13 @@ export async function repetirUltimoLaudo(
   }
 
   // Sem histórico: prepara do zero
-  const novo = prepararLaudoDoPaciente(patient, doctorUid, appointmentId);
+  const novo = prepararLaudoDoPaciente({
+  patientID: patient.id,
+  idade: patient.idade,
+  'data de nascimento': patient['data de nascimento'] instanceof Timestamp
+    ? patient['data de nascimento']
+    : patient['data de nascimento'].toDate(),
+  }, doctorUid, appointmentId);
   return {
     tipo: 'laudo',
     dados: novo,
