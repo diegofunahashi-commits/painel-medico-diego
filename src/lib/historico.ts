@@ -214,3 +214,4 @@ export function sincronizarDadosPacienteNoLaudo(
     'data de nascimento': patient['data de nascimento'],
   };
 }
+}

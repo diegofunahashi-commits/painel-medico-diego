@@ -2,12 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { useAuthContext } from '@/components/AuthProvider';
-import { criarReceita, atualizarReceita } from '@/lib/receitas';
+import { criarReceita } from '@/lib/receitas';
 import type { Receita, MedicacaoReceita, Patient } from '@/types/firestore';
-import { Plus, Trash2, Calculator, Save, X, Pill } from 'lucide-react';
+import { Plus, Trash2, Calculator, Save, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-// Banco de medicamentos (depois vem do Firestore)
 const MEDICAMENTOS_DB = [
   { nome: 'Levetiracetam', categoria: 'Anticonvulsivante', dosePadrao: 30, unidade: 'mg/kg/dia', frequencia: 'De 12 em 12 horas', apresentacoes: ['Solução Oral 100 mg/mL', 'Comprimido 250 mg', 'Comprimido 500 mg'] },
   { nome: 'Ácido Valpróico', categoria: 'Anticonvulsivante', dosePadrao: 30, unidade: 'mg/kg/dia', frequencia: 'De 12 em 12 horas', apresentacoes: ['Solução Oral 250 mg/5mL', 'Comprimido 200 mg', 'Comprimido 500 mg'] },
@@ -42,14 +41,12 @@ export default function ReceitaForm({ patient, receitaInicial, onSalvo, onCancel
   const [salvando, setSalvando] = useState(false);
   const [pesoAtual, setPesoAtual] = useState(parseFloat(patient.peso) || 0);
 
-  // Inicializa com dados clonados ou do paciente
   useEffect(() => {
     if (receitaInicial) {
       setMedicamentos(receitaInicial.medicacoes);
       setCidade(patient.endereco?.cidade ? `${patient.endereco.cidade} - SP` : 'São Paulo - SP');
       setPesoAtual(parseFloat(receitaInicial.peso) || parseFloat(patient.peso) || 0);
     } else {
-      // Nova receita: inicia vazia
       setMedicamentos([]);
       setCidade(patient.endereco?.cidade ? `${patient.endereco.cidade} - SP` : 'São Paulo - SP');
       setPesoAtual(parseFloat(patient.peso) || 0);
@@ -94,14 +91,12 @@ export default function ReceitaForm({ patient, receitaInicial, onSalvo, onCancel
     let posologia = '';
 
     if (dbMed.nome === 'Levetiracetam') {
-      // Solução 100 mg/mL
       const mlTotal = doseTotal / 100;
       const mlPorDose = mlTotal / 2;
       doseCalculada = `${mlPorDose.toFixed(1)} mL por tomada (${mlTotal.toFixed(1)} mL/dia)`;
       posologia = `Dar ${mlPorDose.toFixed(1)} mL via oral de 12 em 12 horas.`;
     } else if (dbMed.nome === 'Risperidona') {
-      // Solução 1 mg/mL
-      const mlTotal = doseTotal; // já é em mg, e 1mg/mL
+      const mlTotal = doseTotal;
       doseCalculada = `${mlTotal.toFixed(2)} mL por dia`;
       posologia = `Dar ${mlTotal.toFixed(2)} mL via oral à noite.`;
     } else if (dbMed.nome === 'Melatonina') {
@@ -137,7 +132,7 @@ export default function ReceitaForm({ patient, receitaInicial, onSalvo, onCancel
     setSalvando(true);
     try {
       const dadosReceita: Omit<Receita, 'prescriptionId' | 'createdAt' | 'updatedAt'> = {
-        patientId: patient.patientID,
+        patientId: patient.patientID,       // ✅ patientID (ID maiúsculo) conforme banco
         doctorUid: user?.uid || '',
         endereco: patient.endereco,
         cpf: patient.cpf,
@@ -164,14 +159,16 @@ export default function ReceitaForm({ patient, receitaInicial, onSalvo, onCancel
           <h3 className="text-lg font-semibold text-slate-900">
             {receitaInicial ? 'Nova Receita (baseada em modelo)' : 'Nova Receita'}
           </h3>
-          <p className="text-sm text-slate-500">{patient['nome completo']} — {pesoAtual} kg</p>
+          {/* ✅ ACESSO VIA COLCHETES para campos com espaço no banco */}
+          <p className="text-sm text-slate-500">
+            {patient['nome completo']} — {pesoAtual} kg
+          </p>
         </div>
         <button onClick={onCancelar} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition">
           <X size={20} />
         </button>
       </div>
 
-      {/* Peso atual (pode ter mudado desde a última consulta) */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-slate-700 mb-2">Peso atual (kg)</label>
         <input
@@ -183,7 +180,6 @@ export default function ReceitaForm({ patient, receitaInicial, onSalvo, onCancel
         />
       </div>
 
-      {/* Lista de medicamentos */}
       <div className="space-y-4 mb-6">
         {medicamentos.map((med, index) => (
           <div key={index} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
@@ -306,7 +302,6 @@ export default function ReceitaForm({ patient, receitaInicial, onSalvo, onCancel
         <span className="text-sm font-medium">Adicionar Medicamento</span>
       </button>
 
-      {/* Cidade */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-slate-700 mb-2">Cidade / Data</label>
         <input
@@ -317,7 +312,6 @@ export default function ReceitaForm({ patient, receitaInicial, onSalvo, onCancel
         />
       </div>
 
-      {/* Ações */}
       <div className="flex gap-3">
         <button
           onClick={handleSalvar}

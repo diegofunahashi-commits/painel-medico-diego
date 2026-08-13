@@ -1,20 +1,42 @@
 // ============================================================================
-// TIPOS FIRESTORE - BASEADOS NO BANCO REAL DO DR. DIEGO FUNAHASHI
+// TIPOS FIRESTORE — FIEL AO BANCO REAL DO DR. DIEGO FUNAHASHI
+// Mantém NOMES EXATOS dos campos (com espaços, erros de digitação, etc.)
 // Coleção: agenda-5dee5
+// Compatível com Next.js + Vercel
 // ============================================================================
 
-import { Timestamp } from 'firebase/firestore';
+import type { Timestamp } from 'firebase/firestore';
 
 // ---------------------------------------------------------------------------
-// TIMESTAMPS (formato Firestore)
+// TIMESTAMP UNIFICADO
 // ---------------------------------------------------------------------------
-export interface FirestoreTimestamp {
+export type FirestoreTimestamp = Timestamp | {
+  _seconds: number;
+  _nanoseconds: number;
+};
+
+// ---------------------------------------------------------------------------
+// SERIALIZAÇÃO PARA API ROUTES / SERVERLESS (VERCEL)
+// ---------------------------------------------------------------------------
+export interface SerializedTimestamp {
   _seconds: number;
   _nanoseconds: number;
 }
 
+export type Serialized<T> = {
+  [K in keyof T]: T[K] extends FirestoreTimestamp
+    ? SerializedTimestamp
+    : T[K] extends FirestoreTimestamp | null
+    ? SerializedTimestamp | null
+    : T[K] extends Array<infer U>
+    ? Array<Serialized<U>>
+    : T[K] extends object
+    ? Serialized<T[K]>
+    : T[K];
+};
+
 // ---------------------------------------------------------------------------
-// PATIENTS
+// ENDEREÇO
 // ---------------------------------------------------------------------------
 export interface Endereco {
   rua: string;
@@ -23,23 +45,26 @@ export interface Endereco {
   cidade: string;
 }
 
+// ---------------------------------------------------------------------------
+// PATIENTS — nomes EXATOS do banco (com espaços e aspas simples)
+// ---------------------------------------------------------------------------
 export interface Patient {
-  patientID:patient.patientID,
-  'nome completo': string;
-  'nome do responsável': string;
+  patientID: string;                    // nome exato do banco (ID maiúsculo)
+  'nome completo': string;              // ✅ com espaço — acessar via ['nome completo']
+  'nome do responsável': string;        // ✅ com espaço e acento
   sexo: 'menino' | 'menina';
-  'data de nascimento': Timestamp | FirestoreTimestamp;
+  'data de nascimento': FirestoreTimestamp;  // ✅ com espaço
   idade: string;
   peso: string;
   cpf: string;
   email: string;
-  telefone: number;
+  telefone: number;                    // conforme banco original
   endereco: Endereco;
   localizacao: 'Araxá' | 'ABC' | 'São Paulo - Capital' | string;
   source: 'agenda' | 'laudo' | 'receita' | 'portal' | 'whatsapp' | 'site';
   status: 'active' | 'inactive' | 'pending_review';
-  createdAt: Timestamp | FirestoreTimestamp;
-  updatedAt: Timestamp | FirestoreTimestamp;
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,8 +91,8 @@ export interface Receita {
   idade: string;
   peso: string;
   medicacoes: MedicacaoReceita[];
-  createdAt: Timestamp | FirestoreTimestamp;
-  updatedAt: Timestamp | FirestoreTimestamp;
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,16 +102,16 @@ export interface Laudo {
   reportId: string;
   patientId: string;
   idade: string;
-  'data de nascimento': Timestamp | FirestoreTimestamp;
+  'data de nascimento': FirestoreTimestamp;  // ✅ com espaço
   appointmentId: string;
   doctorUid: string;
   cidCodes: string[];
   diagnosisIds: string[];
   textoLaudo: string;
   status: 'draft' | 'signed' | 'amended';
-  'informacoes adiconais': string;
-  createdAt: Timestamp | FirestoreTimestamp;
-  updatedAt: Timestamp | FirestoreTimestamp;
+  'informacoes adiconais': string;      // ✅ mantido com erro de digitação original
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,10 +123,10 @@ export interface Diagnostico {
   cidCode: string;
   nomeDiagnostico: string;
   descricao: string;
-  dataInicio: Timestamp | FirestoreTimestamp;
+  dataInicio: FirestoreTimestamp;
   status: 'active' | 'resolved' | 'suspected';
-  createdAt: Timestamp | FirestoreTimestamp;
-  updatedAt: Timestamp | FirestoreTimestamp;
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,12 +136,12 @@ export interface Terapia {
   therapyId: string;
   patientId: string;
   nomeTerapia: string;
-  tipo: string; // "psicologia", "fono", "TO", etc.
+  tipo: string;
   status: 'active' | 'past' | 'planned';
   descricao: string;
-  'frequencia por semana': number;
-  createdAt: Timestamp | FirestoreTimestamp;
-  updatedAt: Timestamp | FirestoreTimestamp;
+  'frequencia por semana': number;      // ✅ com espaço
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,17 +150,17 @@ export interface Terapia {
 export interface Agendamento {
   appointmentId: string;
   patientId: string;
-  dataHora: Timestamp | FirestoreTimestamp;
+  dataHora: FirestoreTimestamp;
   tipoConsulta: 'primeira' | 'retorno' | 'encaixe' | 'avaliacao' | 'teleconsulta';
   status: 'pendente' | 'confirmada' | 'cancelada' | 'no-show' | 'retorno';
   source: 'whatsapp' | 'site' | 'portal';
   doctorUid: string;
   createdByUid: string;
   slotId: string;
-  inicioEm: Timestamp | FirestoreTimestamp;
+  inicioEm: FirestoreTimestamp;
   unidadeId: 'sp_capital' | 'abc' | 'araxa';
-  createdAt: Timestamp | FirestoreTimestamp;
-  updatedAt: Timestamp | FirestoreTimestamp;
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,20 +184,20 @@ export interface User {
   patientId: string;
   active: boolean;
   permissions: UserPermissions;
-  createdAt: Timestamp | FirestoreTimestamp;
-  updatedAt: Timestamp | FirestoreTimestamp;
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
 }
 
 // ---------------------------------------------------------------------------
 // CONSENTIMENTOS
 // ---------------------------------------------------------------------------
 export interface Consentimento {
-  'CONS-0001': string;
+  'CONS-0001': string;                  // ✅ nome exato do banco
   patientId: string;
   userUid: string;
-  versaoTermo: Timestamp | FirestoreTimestamp;
+  versaoTermo: FirestoreTimestamp;
   aceito: boolean;
-  aceitoEm: Timestamp | FirestoreTimestamp;
+  aceitoEm: FirestoreTimestamp;
   tipo: 'portal' | 'comunicacao_whatsapp' | 'compartilhamento_documentos' | 'telemedicina' | 'marketing' | 'curso_personalizado';
 }
 
@@ -180,11 +205,11 @@ export interface Consentimento {
 // ARQUIVOS
 // ---------------------------------------------------------------------------
 export interface Arquivo {
-  'ARQ-0001': string;
+  'ARQ-0001': string;                   // ✅ nome exato do banco
   patientId: string;
   nomeOriginal: string;
   storagePath: string;
-  createdAt: Timestamp | FirestoreTimestamp;
+  createdAt: FirestoreTimestamp;
   categoria: 'exame' | 'relatorio_escolar' | 'relatorio_terapeutico' | 'laudo';
 }
 
@@ -201,12 +226,12 @@ export interface ConfiguracaoAgenda {
   duracaoMinutos: number;
   modalidade: 'presencial' | 'teleconsulta';
   tiposConsultaPermitidos: string[];
-  maximoAgendamentosDia: string;
+  maximoAgendamentosDia: string;        // conforme banco (string)
   antecedenciaMinimaHoras: number;
-  ativo: string;
+  ativo: string;                        // conforme banco (string)
   intervaloMinutos: number;
-  createdAt: Timestamp | FirestoreTimestamp;
-  updatedAt: Timestamp | FirestoreTimestamp;
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,29 +251,29 @@ export interface ClinicConfig {
 }
 
 export interface Settings {
-  clinic_config: ClinicConfig;
+  clinic_config: ClinicConfig;          // conforme banco (snake_case)
 }
 
 // ---------------------------------------------------------------------------
 // NOTIFICAÇÕES
 // ---------------------------------------------------------------------------
 export interface Notificacao {
-  'NOT-0001': string;
+  'NOT-0001': string;                   // ✅ nome exato do banco
   userUid: string;
   tipo: string;
   titulo: string;
   mensagem: string;
   recursoId: string;
   lida: boolean;
-  createdAt: Timestamp | FirestoreTimestamp;
+  createdAt: FirestoreTimestamp;
 }
 
 // ---------------------------------------------------------------------------
-// ARTICLES (Biblioteca Educativa)
+// ARTICLES
 // ---------------------------------------------------------------------------
 export interface Article {
   id: string;
-  title_pt: string;
+  title_pt: string;                     // conforme banco
   title_en: string;
   category_pt: string;
   category_en: string;
@@ -267,7 +292,7 @@ export interface ChatMessage {
   id: string;
   userUid: string;
   sender: 'doctor' | 'patient' | 'staff';
-  text_pt: string;
+  text_pt: string;                      // conforme banco
   text_en: string;
   text: string;
   timestamp: string;
@@ -275,10 +300,8 @@ export interface ChatMessage {
 }
 
 // ---------------------------------------------------------------------------
-// TIPOS AUXILIARES PARA O PAINEL
+// TIPOS AUXILIARES
 // ---------------------------------------------------------------------------
-
-// Resumo rápido do paciente (calculado no front)
 export interface PatientResumo {
   totalReceitas: number;
   totalLaudos: number;
@@ -289,7 +312,6 @@ export interface PatientResumo {
   ultimoLaudo: Laudo | null;
 }
 
-// Dados para clonar receita
 export interface ReceitaClonada {
   patientId: string;
   doctorUid: string;
@@ -300,14 +322,58 @@ export interface ReceitaClonada {
   medicacoes: MedicacaoReceita[];
 }
 
-// Dados para clonar laudo
 export interface LaudoClonado {
   patientId: string;
   idade: string;
-  'data de nascimento': Timestamp | FirestoreTimestamp;
+  'data de nascimento': FirestoreTimestamp;
   doctorUid: string;
   cidCodes: string[];
   diagnosisIds: string[];
   textoLaudo: string;
-  'informacoes adiconais': string;
+  'informacoes adiconais': string;      // ✅ mantido conforme banco
+}
+
+// ---------------------------------------------------------------------------
+// HELPERS DE SERIALIZAÇÃO (PARA API ROUTES / VERCEL)
+// ---------------------------------------------------------------------------
+export function serializeTimestamp(ts: Timestamp | SerializedTimestamp): SerializedTimestamp {
+  if ('toMillis' in ts) {
+    return {
+      _seconds: Math.floor(ts.toMillis() / 1000),
+      _nanoseconds: (ts.toMillis() % 1000) * 1000000,
+    };
+  }
+  return ts;
+}
+
+export function serializeDocument<T extends Record<string, any>>(doc: T): Serialized<T> {
+  const serialized: any = {};
+  for (const key in doc) {
+    if (doc[key] && typeof doc[key] === 'object') {
+      if ('toMillis' in doc[key] && typeof doc[key].toMillis === 'function') {
+        serialized[key] = serializeTimestamp(doc[key]);
+      } else if (Array.isArray(doc[key])) {
+        serialized[key] = doc[key].map((item: any) =>
+          item && typeof item === 'object' && 'toMillis' in item
+            ? serializeTimestamp(item)
+            : item
+        );
+      } else {
+        serialized[key] = doc[key];
+      }
+    } else {
+      serialized[key] = doc[key];
+    }
+  }
+  return serialized as Serialized<T>;
+}
+
+// ---------------------------------------------------------------------------
+// RESPOSTA PADRONIZADA DE API
+// ---------------------------------------------------------------------------
+export interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
 }
