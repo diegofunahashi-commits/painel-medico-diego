@@ -143,6 +143,7 @@ return {
   dados: novo,
   mensagem: 'Nenhum laudo anterior encontrado. Formulário iniciado com dados do paciente.',
 };
+}
 // ---------------------------------------------------------------------------
 // CLONAR POR ID ESPECÍFICO (MODAL DE HISTÓRICO)
 // ---------------------------------------------------------------------------
@@ -213,5 +214,4 @@ export function sincronizarDadosPacienteNoLaudo(
     idade: patient.idade,
     'data de nascimento': patient['data de nascimento'],
   };
-}
 }
