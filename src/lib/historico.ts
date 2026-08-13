@@ -127,7 +127,7 @@ export async function repetirUltimoLaudo(
 
   // Sem histórico: prepara do zero
   const novo = prepararLaudoDoPaciente({
-  patientID: patient.id,
+  patientID: patient.patientID
   idade: patient.idade,
   'data de nascimento': patient['data de nascimento'] instanceof Timestamp
     ? patient['data de nascimento']
