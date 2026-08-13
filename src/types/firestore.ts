@@ -46,6 +46,7 @@ export interface Patient {
 // RECEITAS
 // ---------------------------------------------------------------------------
 export interface MedicacaoReceita {
+  ordem: number;
   nome: string;
   dose: string;
   via: string;
