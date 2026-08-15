@@ -1,13 +1,34 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuthContext } from '@/components/AuthProvider';
 import { criarLaudo } from '@/lib/laudos';
 import type { Laudo, Patient } from '@/types/firestore';
 import { Plus, Trash2, Save, X, FileText, Stethoscope } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-// Banco de diagnósticos (depois vem do Firestore)
+/* ─── Utilitários de data (proteção contra Invalid time value) ─── */
+const toDate = (val: unknown): Date | null => {
+  if (!val) return null;
+  if (val instanceof Date) return val;
+  if (typeof val === 'object' && 'toDate' in val && typeof (val as { toDate: () => Date }).toDate === 'function') {
+    return (val as { toDate: () => Date }).toDate();
+  }
+  if (typeof val === 'string' || typeof val === 'number') {
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+};
+
+const formatarData = (val: unknown, fmt = 'dd/MM/yyyy'): string => {
+  const d = toDate(val);
+  if (!d) return '-';
+  // Importa date-fns sob demanda ou use Intl.DateTimeFormat se preferir evitar import
+  return d.toLocaleDateString('pt-BR');
+};
+/* ─────────────────────────────────────────────────────────────── */
+
 const DIAGNOSTICOS_DB = [
   { id: 'tea', nome: 'Transtorno do Espectro Autista (TEA)', cid10: 'F84.0 / F84.5', cid11: '6A02', temGravidade: true, gravidades: ['Leve - suporte mínimo', 'Moderado - suporte substancial', 'Grave - suporte muito substancial'], template: 'Paciente apresenta padrão de comportamento compatível com Transtorno do Espectro Autista (TEA)...' },
   { id: 'tdah_combinada', nome: 'TDAH - Apresentação combinada', cid10: 'F90.0', cid11: '6A05.2', temGravidade: false, gravidades: [], template: 'Paciente apresenta critérios diagnósticos para Transtorno do Déficit de Atenção com Hiperatividade (TDAH)...' },
@@ -75,33 +96,45 @@ export default function LaudoForm({ patient, laudoInicial, onSalvo, onCancelar }
   const [diagnosticoAtual, setDiagnosticoAtual] = useState('');
   const [gravidadeAtual, setGravidadeAtual] = useState('');
 
-  // Inicializa com dados clonados
+  const atualizarTextoLaudo = useCallback((diags: DiagnosticoSelecionado[]) => {
+    const textos = diags.map(d => {
+      let texto = d.textoEditado;
+      if (d.gravidade) texto = texto.replace(/\[GRAVIDADE\]/g, d.gravidade);
+      return texto;
+    });
+    setTextoLaudo(textos.join('\n\n'));
+  }, []);
+
   useEffect(() => {
     if (laudoInicial) {
-      // Reconstrói diagnósticos do laudo clonado
-      const diags: DiagnosticoSelecionado[] = laudoInicial.cidCodes.map((cid, idx) => {
+      const cids = laudoInicial.cidCodes ?? [];
+      const diagIds = laudoInicial.diagnosisIds ?? [];
+      const diags: DiagnosticoSelecionado[] = cids.map((cid, idx) => {
         const dbDiag = DIAGNOSTICOS_DB.find(d => d.cid10.includes(cid)) || DIAGNOSTICOS_DB[0];
         return {
           id: dbDiag.id,
           nome: dbDiag.nome,
           cid10: cid,
-          cid11: laudoInicial.diagnosisIds[idx] || dbDiag.cid11,
+          cid11: diagIds[idx] || dbDiag.cid11,
           textoEditado: laudoInicial.textoLaudo || dbDiag.template,
           foiEditado: true,
         };
       });
       setDiagnosticos(diags);
-      setTextoLaudo(laudoInicial.textoLaudo);
-      setObservacoes(laudoInicial['informacoes adiconais']);
-      // Terapias
-      setTerapias([]); // Simplificado - reconstruir se necessário
+      setTextoLaudo(laudoInicial.textoLaudo ?? '');
+      setObservacoes(
+        (laudoInicial as Record<string, string>)?.['informacoes adicionais'] ??
+        (laudoInicial as Record<string, string>)?.['informacoes adiconais'] ??
+        ''
+      );
+      const terapiasIniciais = (laudoInicial as Record<string, unknown>)?.terapias as TerapiaSelecionada[] | undefined;
+      setTerapias(terapiasIniciais ?? []);
     }
   }, [laudoInicial]);
 
   const adicionarDiagnostico = () => {
     const dbDiag = DIAGNOSTICOS_DB.find(d => d.id === diagnosticoAtual);
     if (!dbDiag) return;
-
     const novo: DiagnosticoSelecionado = {
       id: dbDiag.id,
       nome: dbDiag.nome,
@@ -111,11 +144,11 @@ export default function LaudoForm({ patient, laudoInicial, onSalvo, onCancelar }
       textoEditado: dbDiag.template,
       foiEditado: false,
     };
-
-    setDiagnosticos([...diagnosticos, novo]);
+    const novosDiagnosticos = [...diagnosticos, novo];
+    setDiagnosticos(novosDiagnosticos);
     setDiagnosticoAtual('');
     setGravidadeAtual('');
-    atualizarTextoLaudo([...diagnosticos, novo]);
+    atualizarTextoLaudo(novosDiagnosticos);
   };
 
   const removerDiagnostico = (index: number) => {
@@ -132,25 +165,8 @@ export default function LaudoForm({ patient, laudoInicial, onSalvo, onCancelar }
     atualizarTextoLaudo(novos);
   };
 
-  const atualizarTextoLaudo = (diags: DiagnosticoSelecionado[]) => {
-    const textos = diags.map(d => {
-      let texto = d.textoEditado;
-      if (d.gravidade) {
-        texto = texto.replace(/\[GRAVIDADE\]/g, d.gravidade);
-      }
-      return texto;
-    });
-    setTextoLaudo(textos.join('\n\n'));
-  };
-
-  const adicionarTerapia = () => {
-    setTerapias([...terapias, { nome: '', horasSemanais: 1 }]);
-  };
-
-  const removerTerapia = (index: number) => {
-    setTerapias(terapias.filter((_, i) => i !== index));
-  };
-
+  const adicionarTerapia = () => setTerapias(prev => [...prev, { nome: '', horasSemanais: 1 }]);
+  const removerTerapia = (index: number) => setTerapias(terapias.filter((_, i) => i !== index));
   const atualizarTerapia = (index: number, campo: keyof TerapiaSelecionada, valor: string | number) => {
     const novas = [...terapias];
     novas[index] = { ...novas[index], [campo]: valor };
@@ -158,36 +174,37 @@ export default function LaudoForm({ patient, laudoInicial, onSalvo, onCancelar }
   };
 
   const handleSalvar = async () => {
-    if (diagnosticos.length === 0) {
-      toast.error('Adicione pelo menos um diagnóstico');
-      return;
-    }
-
+    if (diagnosticos.length === 0) { toast.error('Adicione pelo menos um diagnóstico'); return; }
     setSalvando(true);
     try {
       const dadosLaudo: Omit<Laudo, 'reportId' | 'createdAt' | 'updatedAt'> = {
-        patientId: patient.patientID,
-        idade: patient.idade,
-        'data de nascimento': patient['data de nascimento'],
-        appointmentId: '', // TODO: vincular à consulta atual
+        patientId: patient?.patientID ?? '',
+        idade: patient?.idade ?? 0,
+        'data de nascimento': patient?.['data de nascimento'] ?? '',
+        appointmentId: '',
         doctorUid: user?.uid || '',
         cidCodes: diagnosticos.map(d => d.cid10),
-        diagnosisIds: diagnosticos.map(d => d.id),
+        diagnosisIds: diagnosticos.map(d => d.cid11),
         textoLaudo: textoLaudo,
         status: 'draft',
         'informacoes adiconais': observacoes,
+        terapias: terapias.filter(t => t.nome.trim() !== ''),
       };
-
       await criarLaudo(dadosLaudo);
       toast.success('Laudo salvo com sucesso!');
       onSalvo();
     } catch (error) {
-      console.error(error);
+      console.error('Erro ao salvar laudo:', error);
       toast.error('Erro ao salvar laudo');
     } finally {
       setSalvando(false);
     }
   };
+
+  const diagnosticoSelecionado = DIAGNOSTICOS_DB.find(d => d.id === diagnosticoAtual);
+  const nomePaciente = patient?.['nome completo'] ?? 'Paciente';
+  const idadePaciente = patient?.idade ?? '-';
+  const dataNascimentoFmt = formatarData(patient?.['data de nascimento']);
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-6">
@@ -196,24 +213,24 @@ export default function LaudoForm({ patient, laudoInicial, onSalvo, onCancelar }
           <h3 className="text-lg font-semibold text-slate-900">
             {laudoInicial ? 'Novo Laudo (baseado em modelo)' : 'Novo Laudo Médico'}
           </h3>
-          <p className="text-sm text-slate-500">{patient['nome completo']} — {patient.idade} anos</p>
+          <p className="text-sm text-slate-500">
+            {nomePaciente} — {idadePaciente} anos {dataNascimentoFmt !== '-' && `• Nasc. ${dataNascimentoFmt}`}
+          </p>
         </div>
         <button onClick={onCancelar} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition">
           <X size={20} />
         </button>
       </div>
 
-      {/* Seleção de Diagnósticos */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
           <Stethoscope size={16} className="text-medical-600" />
           Diagnósticos CID-10/11
         </label>
-
         <div className="flex gap-2 mb-3">
           <select
             value={diagnosticoAtual}
-            onChange={(e) => setDiagnosticoAtual(e.target.value)}
+            onChange={(e) => { setDiagnosticoAtual(e.target.value); setGravidadeAtual(''); }}
             className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-medical-500 outline-none text-sm"
           >
             <option value="">Selecione o diagnóstico...</option>
@@ -221,20 +238,18 @@ export default function LaudoForm({ patient, laudoInicial, onSalvo, onCancelar }
               <option key={d.id} value={d.id}>{d.nome} ({d.cid10})</option>
             ))}
           </select>
-
-          {DIAGNOSTICOS_DB.find(d => d.id === diagnosticoAtual)?.temGravidade && (
+          {diagnosticoSelecionado?.temGravidade && (
             <select
               value={gravidadeAtual}
               onChange={(e) => setGravidadeAtual(e.target.value)}
               className="w-48 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-medical-500 outline-none text-sm"
             >
               <option value="">Gravidade...</option>
-              {DIAGNOSTICOS_DB.find(d => d.id === diagnosticoAtual)?.gravidades.map((g) => (
+              {diagnosticoSelecionado.gravidades.map((g) => (
                 <option key={g} value={g}>{g}</option>
               ))}
             </select>
           )}
-
           <button
             onClick={adicionarDiagnostico}
             disabled={!diagnosticoAtual}
@@ -243,25 +258,18 @@ export default function LaudoForm({ patient, laudoInicial, onSalvo, onCancelar }
             <Plus size={16} />
           </button>
         </div>
-
-        {/* Diagnósticos selecionados */}
         <div className="space-y-3">
           {diagnosticos.map((diag, index) => (
-            <div key={index} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+            <div key={`${diag.id}-${index}`} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
               <div className="flex items-center justify-between mb-2">
                 <div>
                   <p className="font-medium text-slate-900">{diag.nome}</p>
                   <p className="text-xs text-slate-500">CID-10: {diag.cid10} | CID-11: {diag.cid11}</p>
                   {diag.gravidade && (
-                    <span className="inline-block mt-1 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded font-medium">
-                      {diag.gravidade}
-                    </span>
+                    <span className="inline-block mt-1 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded font-medium">{diag.gravidade}</span>
                   )}
                 </div>
-                <button
-                  onClick={() => removerDiagnostico(index)}
-                  className="p-1 text-slate-400 hover:text-red-500 transition"
-                >
+                <button onClick={() => removerDiagnostico(index)} className="p-1 text-slate-400 hover:text-red-500 transition" aria-label="Remover diagnóstico">
                   <Trash2 size={14} />
                 </button>
               </div>
@@ -277,10 +285,8 @@ export default function LaudoForm({ patient, laudoInicial, onSalvo, onCancelar }
         </div>
       </div>
 
-      {/* Terapias */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-slate-700 mb-2">Terapias Recomendadas</label>
-
         <div className="space-y-2 mb-3">
           {terapias.map((terapia, index) => (
             <div key={index} className="flex gap-2">
@@ -290,43 +296,29 @@ export default function LaudoForm({ patient, laudoInicial, onSalvo, onCancelar }
                 className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-medical-500 outline-none text-sm"
               >
                 <option value="">Selecione...</option>
-                {TERAPIAS_DB.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
+                {TERAPIAS_DB.map((t) => (<option key={t} value={t}>{t}</option>))}
               </select>
               <input
-                type="number"
-                min={1}
-                max={40}
+                type="number" min={1} max={40}
                 value={terapia.horasSemanais}
-                onChange={(e) => atualizarTerapia(index, 'horasSemanais', parseInt(e.target.value) || 1)}
+                onChange={(e) => atualizarTerapia(index, 'horasSemanais', Math.max(1, parseInt(e.target.value) || 1))}
                 className="w-24 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-medical-500 outline-none text-sm"
                 placeholder="h/semana"
               />
-              <button
-                onClick={() => removerTerapia(index)}
-                className="p-2 text-slate-400 hover:text-red-500 transition"
-              >
+              <button onClick={() => removerTerapia(index)} className="p-2 text-slate-400 hover:text-red-500 transition" aria-label="Remover terapia">
                 <Trash2 size={14} />
               </button>
             </div>
           ))}
         </div>
-
-        <button
-          onClick={adicionarTerapia}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm text-medical-600 hover:text-medical-700 font-medium"
-        >
-          <Plus size={14} />
-          Adicionar terapia
+        <button onClick={adicionarTerapia} className="flex items-center gap-2 px-3 py-1.5 text-sm text-medical-600 hover:text-medical-700 font-medium">
+          <Plus size={14} /> Adicionar terapia
         </button>
       </div>
 
-      {/* Texto completo do laudo */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
-          <FileText size={16} className="text-medical-600" />
-          Texto Completo do Laudo
+          <FileText size={16} className="text-medical-600" /> Texto Completo do Laudo
         </label>
         <textarea
           value={textoLaudo}
@@ -337,7 +329,6 @@ export default function LaudoForm({ patient, laudoInicial, onSalvo, onCancelar }
         />
       </div>
 
-      {/* Observações */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-slate-700 mb-2">Observações / Informações Adicionais</label>
         <textarea
@@ -349,20 +340,11 @@ export default function LaudoForm({ patient, laudoInicial, onSalvo, onCancelar }
         />
       </div>
 
-      {/* Ações */}
       <div className="flex gap-3">
-        <button
-          onClick={handleSalvar}
-          disabled={salvando}
-          className="flex items-center gap-2 px-6 py-2.5 bg-medical-600 text-white rounded-lg hover:bg-medical-700 transition font-medium disabled:opacity-50"
-        >
-          <Save size={18} />
-          {salvando ? 'Salvando...' : 'Salvar Laudo'}
+        <button onClick={handleSalvar} disabled={salvando} className="flex items-center gap-2 px-6 py-2.5 bg-medical-600 text-white rounded-lg hover:bg-medical-700 transition font-medium disabled:opacity-50">
+          <Save size={18} /> {salvando ? 'Salvando...' : 'Salvar Laudo'}
         </button>
-        <button
-          onClick={onCancelar}
-          className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition font-medium"
-        >
+        <button onClick={onCancelar} className="px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition font-medium">
           Cancelar
         </button>
       </div>
