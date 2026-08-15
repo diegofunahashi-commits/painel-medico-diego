@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthContext } from "@/components/AuthProvider";
 import { buscarTodosPacientes } from "@/lib/pacientes";
-import { buscarAgendamentosDoDia } from "@/lib/agendamentos";
 import type { Patient, Agendamento } from "@/types/firestore";
 import Link from "next/link";
 import { Users, Calendar, FileText, TrendingUp, Clock, ArrowRight } from "lucide-react";
@@ -31,7 +30,6 @@ export default function DashboardPage() {
       try {
         const { pacientes } = await buscarTodosPacientes(5);
         setPacientesRecentes(pacientes);
-        // TODO: buscar consultas do dia e stats reais
         setStats({ pacientes: pacientes.length, consultasHoje: 0, receitasMes: 0, laudosMes: 0 });
       } catch (e) {
         console.error(e);
@@ -119,21 +117,26 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="space-y-3">
-            {pacientesRecentes.map((p) => (
-              <Link
-                key={p.patientID}
-                href={`/pacientes/${p.patientID}`}
-                className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 transition"
-              >
-                <div className="w-9 h-9 rounded-full bg-medical-100 flex items-center justify-center text-medical-600 text-sm font-bold">
-                  {p['nome completo'].charAt(0)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-900 truncate">{p['nome completo']}</p>
-                  <p className="text-xs text-slate-500">{p.idade} anos • {p.localizacao}</p>
-                </div>
-              </Link>
-            ))}
+            {pacientesRecentes.map((p) => {
+              const nome = p['nome completo'] || "Sem nome";
+              const idade = p.idade || "-";
+              const localizacao = p.localizacao || "-";
+              return (
+                <Link
+                  key={p.patientID || Math.random()}
+                  href={`/pacientes/${p.patientID}`}
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 transition"
+                >
+                  <div className="w-9 h-9 rounded-full bg-medical-100 flex items-center justify-center text-medical-600 text-sm font-bold">
+                    {nome.charAt(0)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-900 truncate">{nome}</p>
+                    <p className="text-xs text-slate-500">{idade} anos • {localizacao}</p>
+                  </div>
+                </Link>
+              );
+            })}
             {pacientesRecentes.length === 0 && (
               <p className="text-sm text-slate-400 text-center py-4">Nenhum paciente cadastrado</p>
             )}

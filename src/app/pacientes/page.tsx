@@ -34,10 +34,11 @@ export default function PacientesPage() {
     load();
   }, [user]);
 
-  const filtrados = pacientes.filter((p) =>
-    p['nome completo'].toLowerCase().includes(busca.toLowerCase()) ||
-    p.cpf.includes(busca)
-  );
+  const filtrados = pacientes.filter((p) => {
+    const nome = p['nome completo'] || "";
+    const cpf = p.cpf || "";
+    return nome.toLowerCase().includes(busca.toLowerCase()) || cpf.includes(busca);
+  });
 
   if (loading || carregando) {
     return (
@@ -65,7 +66,6 @@ export default function PacientesPage() {
         </Link>
       </div>
 
-      {/* Busca */}
       <div className="relative mb-6">
         <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
@@ -77,7 +77,6 @@ export default function PacientesPage() {
         />
       </div>
 
-      {/* Lista */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         {filtrados.length === 0 ? (
           <div className="text-center py-12">
@@ -86,25 +85,30 @@ export default function PacientesPage() {
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {filtrados.map((p) => (
-              <Link
-                key={p.patientID}
-                href={`/pacientes/${p.patientID}`}
-                className="flex items-center gap-4 p-4 hover:bg-slate-50 transition"
-              >
-                <div className="w-10 h-10 rounded-full bg-medical-100 flex items-center justify-center text-medical-600 font-bold text-sm">
-                  {p['nome completo'].charAt(0)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-900">{p['nome completo']}</p>
-                  <div className="flex items-center gap-3 text-sm text-slate-500 mt-0.5">
-                    <span className="flex items-center gap-1"><Phone size={12} /> {p.telefone}</span>
-                    <span className="flex items-center gap-1"><MapPin size={12} /> {p.localizacao}</span>
+            {filtrados.map((p) => {
+              const nome = p['nome completo'] || "Sem nome";
+              const telefone = p.telefone || "-";
+              const localizacao = p.localizacao || "-";
+              return (
+                <Link
+                  key={p.patientID || Math.random()}
+                  href={`/pacientes/${p.patientID}`}
+                  className="flex items-center gap-4 p-4 hover:bg-slate-50 transition"
+                >
+                  <div className="w-10 h-10 rounded-full bg-medical-100 flex items-center justify-center text-medical-600 font-bold text-sm">
+                    {nome.charAt(0)}
                   </div>
-                </div>
-                <ArrowRight size={16} className="text-slate-300" />
-              </Link>
-            ))}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-slate-900">{nome}</p>
+                    <div className="flex items-center gap-3 text-sm text-slate-500 mt-0.5">
+                      <span className="flex items-center gap-1"><Phone size={12} /> {telefone}</span>
+                      <span className="flex items-center gap-1"><MapPin size={12} /> {localizacao}</span>
+                    </div>
+                  </div>
+                  <ArrowRight size={16} className="text-slate-300" />
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>
