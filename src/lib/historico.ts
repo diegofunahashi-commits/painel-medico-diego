@@ -2,6 +2,7 @@
 // HISTÓRICO COMBINADO - CLONAR/REPETIR RECEITAS E LAUDOS
 // Dr. Diego Funahashi Alves - Neurologia Pediátrica
 // ============================================================================
+
 import { Timestamp } from 'firebase/firestore';
 import type { Receita, Laudo, Patient, Agendamento } from '@/types/firestore';
 import { buscarUltimaReceita, clonarUltimaReceita, prepararReceitaDoPaciente } from './receitas';
@@ -117,101 +118,31 @@ export async function repetirUltimoLaudo(
   const clonado = await clonarUltimoLaudo(patient.patientID, doctorUid);
 
   if (clonado) {
-  return {
-    tipo: 'laudo',
-    dados: clonado,
-    mensagem: `Último laudo carregado com ${clonado.cidCodes.length} diagnóstico(s). Revise o texto antes de salvar.`,
-  };
-}
+    return {
+      tipo: 'laudo',
+      dados: clonado,
+      mensagem: `Último laudo carregado com ${clonado.cidCodes.length} diagnóstico(s). Revise o texto antes de salvar.`,
+    };
+  }
 
-// Sem histórico: prepara do zero
-const novo = prepararLaudoDoPaciente({
-  patientID: patient.patientID,
-  idade: patient.idade,
+  // Sem histórico: prepara do zero
+  const dataNascimento = patient['data de nascimento'];
 
-  'data de nascimento':
-    patient['data de nascimento'] instanceof Timestamp
-      ? patient['data de nascimento']
+  const novo = prepararLaudoDoPaciente({
+    patientID: patient.patientID,
+    idade: patient.idade,
+    'data de nascimento': dataNascimento instanceof Timestamp
+      ? dataNascimento
       : Timestamp.fromDate(
-          new Date(patient['data de nascimento']._seconds * 1000)
+          new Date(
+            (dataNascimento as { _seconds: number })._seconds * 1000
+          )
         ),
-
-}, doctorUid, appointmentId);
-
-return {
-  tipo: 'laudo',
-  dados: novo,
-  mensagem: 'Nenhum laudo anterior encontrado. Formulário iniciado com dados do paciente.',
-};
-}
-// ---------------------------------------------------------------------------
-// CLONAR POR ID ESPECÍFICO (MODAL DE HISTÓRICO)
-// ---------------------------------------------------------------------------
-
-/**
- * Usado no modal de histórico: o médico escolhe uma receita/laudo específico
- * e clica em "Usar como modelo"
- */
-export async function usarReceitaComoModelo(
-  prescriptionId: string,
-  doctorUid: string
-): Promise<DadosClonados | null> {
-  const { clonarReceitaPorId } = await import('./receitas');
-  const clonada = await clonarReceitaPorId(prescriptionId, doctorUid);
-
-  if (!clonada) return null;
-
-  return {
-    tipo: 'receita',
-    dados: clonada,
-    mensagem: `Receita clonada com ${clonada.medicacoes.length} medicamento(s).`,
-  };
-}
-
-export async function usarLaudoComoModelo(
-  reportId: string,
-  doctorUid: string
-): Promise<DadosClonados | null> {
-  const { clonarLaudoPorId } = await import('./laudos');
-  const clonado = await clonarLaudoPorId(reportId, doctorUid);
-
-  if (!clonado) return null;
+  }, doctorUid, appointmentId);
 
   return {
     tipo: 'laudo',
-    dados: clonado,
-    mensagem: `Laudo clonado com ${clonado.cidCodes.length} diagnóstico(s).`,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// ATUALIZAR DADOS DO PACIENTE NA RECEITA/LAUDO
-// ---------------------------------------------------------------------------
-
-/**
- * Atualiza idade, peso e endereço do paciente nos dados clonados
- * Útil quando o paciente veio para consulta e os dados mudaram
- */
-export function sincronizarDadosPacienteNaReceita(
-  dadosReceita: Omit<Receita, 'prescriptionId' | 'createdAt' | 'updatedAt'>,
-  patient: Patient
-): Omit<Receita, 'prescriptionId' | 'createdAt' | 'updatedAt'> {
-  return {
-    ...dadosReceita,
-    endereco: patient.endereco,
-    cpf: patient.cpf,
-    idade: patient.idade,
-    peso: patient.peso,
-  };
-}
-
-export function sincronizarDadosPacienteNoLaudo(
-  dadosLaudo: Omit<Laudo, 'reportId' | 'createdAt' | 'updatedAt'>,
-  patient: Patient
-): Omit<Laudo, 'reportId' | 'createdAt' | 'updatedAt'> {
-  return {
-    ...dadosLaudo,
-    idade: patient.idade,
-    'data de nascimento': patient['data de nascimento'],
+    dados: novo,
+    mensagem: 'Nenhum laudo anterior encontrado. Formulário iniciado com dados do paciente.',
   };
 }

@@ -3,34 +3,66 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthContext } from "@/components/AuthProvider";
-import { buscarTodosPacientes } from "@/lib/pacientes";
-import type { Patient, Agendamento } from "@/types/firestore";
-import Link from "next/link";
-import { Users, Calendar, FileText, TrendingUp, Clock, ArrowRight } from "lucide-react";
+import { buscarReceitasPorPaciente } from "@/lib/receitas"; // ajuste conforme sua lib
+import type { Receita } from "@/types/firestore";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
-export default function DashboardPage() {
+// Mesmo helper seguro do HistoricoReceitas
+function toDate(valor: unknown): Date | null {
+  if (!valor) return null;
+  if (valor instanceof Date) return isNaN(valor.getTime()) ? null : valor;
+  if (typeof valor === "string" || typeof valor === "number") {
+    const d = new Date(valor);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof (valor as { toDate?: () => Date }).toDate === "function") {
+    try {
+      const d = (valor as { toDate: () => Date }).toDate();
+      return d instanceof Date && !isNaN(d.getTime()) ? d : null;
+    } catch {
+      return null;
+    }
+  }
+  if (
+    typeof valor === "object" &&
+    valor !== null &&
+    "seconds" in valor &&
+    typeof (valor as { seconds: unknown }).seconds === "number"
+  ) {
+    const d = new Date((valor as { seconds: number }).seconds * 1000);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+function formatarData(valor: unknown, formato: string): string {
+  const data = toDate(valor);
+  if (!data) return "—";
+  try {
+    return format(data, formato, { locale: ptBR });
+  } catch {
+    return "Data inválida";
+  }
+}
+
+export default function ReceitasPage() {
   const { user, loading } = useAuthContext();
   const router = useRouter();
-  const [stats, setStats] = useState({ pacientes: 0, consultasHoje: 0, receitasMes: 0, laudosMes: 0 });
-  const [consultasHoje, setConsultasHoje] = useState<Agendamento[]>([]);
-  const [pacientesRecentes, setPacientesRecentes] = useState<Patient[]>([]);
+  const [receitas, setReceitas] = useState<Receita[]>([]);
   const [carregando, setCarregando] = useState(true);
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.push("/login");
-    }
+    if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
   useEffect(() => {
     if (!user) return;
     const load = async () => {
       try {
-        const { pacientes } = await buscarTodosPacientes(5);
-        setPacientesRecentes(pacientes);
-        setStats({ pacientes: pacientes.length, consultasHoje: 0, receitasMes: 0, laudosMes: 0 });
+        // Ajuste conforme sua API — exemplo:
+        const { receitas: lista } = await buscarReceitasPorPaciente("todos", 50);
+        setReceitas(lista || []);
       } catch (e) {
         console.error(e);
       } finally {
@@ -48,124 +80,40 @@ export default function DashboardPage() {
     );
   }
 
-  if (!user) return null;
-
-  const hoje = new Date();
-
   return (
-    <div>
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-        <p className="text-slate-500">{format(hoje, "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
-      </div>
+    <div className="max-w-5xl mx-auto p-6">
+      <h1 className="text-2xl font-bold text-slate-900 mb-6">Histórico de Receitas</h1>
 
-      {/* Cards de stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white border border-slate-200 rounded-xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-500">Pacientes</p>
-              <p className="text-2xl font-bold text-slate-900">{stats.pacientes}</p>
+      {receitas.length === 0 ? (
+        <p className="text-slate-500">Nenhuma receita encontrada.</p>
+      ) : (
+        <div className="space-y-3">
+          {receitas.map((receita) => (
+            <div
+              key={receita.prescriptionId}
+              className="bg-white border border-slate-200 rounded-xl p-4"
+            >
+              <p className="font-medium text-slate-900">
+                Receita {receita.prescriptionId}
+              </p>
+              <p className="text-sm text-slate-500">
+                {/* AQUI ESTÁ A CORREÇÃO: usa formatarData em vez de format direto */}
+                {formatarData(receita.createdAt, "dd/MM/yyyy 'às' HH:mm")}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {receita.medicacoes?.map((med, idx) => (
+                  <span
+                    key={idx}
+                    className="px-2 py-1 bg-slate-100 text-slate-700 text-xs rounded-md"
+                  >
+                    {med.nome}
+                  </span>
+                ))}
+              </div>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-medical-100 flex items-center justify-center text-medical-600">
-              <Users size={20} />
-            </div>
-          </div>
+          ))}
         </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-500">Consultas Hoje</p>
-              <p className="text-2xl font-bold text-slate-900">{stats.consultasHoje}</p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center text-green-600">
-              <Calendar size={20} />
-            </div>
-          </div>
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-500">Receitas (mês)</p>
-              <p className="text-2xl font-bold text-slate-900">{stats.receitasMes}</p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center text-amber-600">
-              <FileText size={20} />
-            </div>
-          </div>
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-500">Laudos (mês)</p>
-              <p className="text-2xl font-bold text-slate-900">{stats.laudosMes}</p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center text-purple-600">
-              <TrendingUp size={20} />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Pacientes recentes */}
-        <div className="bg-white border border-slate-200 rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-slate-900">Pacientes Recentes</h2>
-            <Link href="/pacientes" className="text-sm text-medical-600 hover:text-medical-700 font-medium flex items-center gap-1">
-              Ver todos <ArrowRight size={14} />
-            </Link>
-          </div>
-          <div className="space-y-3">
-            {pacientesRecentes.map((p) => {
-              const nome = p['nome completo'] || "Sem nome";
-              const idade = p.idade || "-";
-              const localizacao = p.localizacao || "-";
-              return (
-                <Link
-                  key={p.patientID || Math.random()}
-                  href={`/pacientes/${p.patientID}`}
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 transition"
-                >
-                  <div className="w-9 h-9 rounded-full bg-medical-100 flex items-center justify-center text-medical-600 text-sm font-bold">
-                    {nome.charAt(0)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-900 truncate">{nome}</p>
-                    <p className="text-xs text-slate-500">{idade} anos • {localizacao}</p>
-                  </div>
-                </Link>
-              );
-            })}
-            {pacientesRecentes.length === 0 && (
-              <p className="text-sm text-slate-400 text-center py-4">Nenhum paciente cadastrado</p>
-            )}
-          </div>
-        </div>
-
-        {/* Ações rápidas */}
-        <div className="bg-white border border-slate-200 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">Ações Rápidas</h2>
-          <div className="grid grid-cols-2 gap-3">
-            <Link href="/pacientes/novo" className="p-4 bg-medical-50 border border-medical-100 rounded-xl hover:bg-medical-100 transition text-center">
-              <Users size={24} className="mx-auto text-medical-600 mb-2" />
-              <p className="text-sm font-medium text-medical-700">Novo Paciente</p>
-            </Link>
-            <Link href="/pacientes" className="p-4 bg-green-50 border border-green-100 rounded-xl hover:bg-green-100 transition text-center">
-              <Calendar size={24} className="mx-auto text-green-600 mb-2" />
-              <p className="text-sm font-medium text-green-700">Ver Agenda</p>
-            </Link>
-            <Link href="/configuracoes" className="p-4 bg-amber-50 border border-amber-100 rounded-xl hover:bg-amber-100 transition text-center">
-              <FileText size={24} className="mx-auto text-amber-600 mb-2" />
-              <p className="text-sm font-medium text-amber-700">Configurar</p>
-            </Link>
-            <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl text-center opacity-60">
-              <Clock size={24} className="mx-auto text-slate-400 mb-2" />
-              <p className="text-sm font-medium text-slate-500">Relatórios</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
