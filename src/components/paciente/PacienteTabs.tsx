@@ -53,6 +53,7 @@ export default function PacienteTabs({ patient, children }: PacienteTabsProps) {
   const nome = patient?.['nome completo'] ?? 'Paciente';
   const idade = patient?.idade ?? calcularIdade(patient?.['data de nascimento']) ?? '-';
   const dataNascFmt = formatarData(patient?.['data de nascimento']);
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'dados', label: 'Dados' },
     { id: 'consultas', label: 'Consultas' },
