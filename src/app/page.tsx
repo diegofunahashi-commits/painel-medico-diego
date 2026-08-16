@@ -3,20 +3,33 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthContext } from "@/components/AuthProvider";
-import { buscarReceitasPorPaciente } from "@/lib/receitas"; // ajuste conforme sua lib
+import { buscarReceitasPorPaciente } from "@/lib/receitas";
 import type { Receita } from "@/types/firestore";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
-// Mesmo helper seguro do HistoricoReceitas
+/* ─────────────────────────────────────────────────────────────── */
+/* Helpers seguros para datas — nunca quebram o app                */
+/* ─────────────────────────────────────────────────────────────── */
+
 function toDate(valor: unknown): Date | null {
   if (!valor) return null;
-  if (valor instanceof Date) return isNaN(valor.getTime()) ? null : valor;
+
+  if (valor instanceof Date) {
+    return isNaN(valor.getTime()) ? null : valor;
+  }
+
   if (typeof valor === "string" || typeof valor === "number") {
     const d = new Date(valor);
     return isNaN(d.getTime()) ? null : d;
   }
-  if (typeof (valor as { toDate?: () => Date }).toDate === "function") {
+
+  if (
+    typeof valor === "object" &&
+    valor !== null &&
+    "toDate" in valor &&
+    typeof (valor as { toDate: () => Date }).toDate === "function"
+  ) {
     try {
       const d = (valor as { toDate: () => Date }).toDate();
       return d instanceof Date && !isNaN(d.getTime()) ? d : null;
@@ -24,6 +37,7 @@ function toDate(valor: unknown): Date | null {
       return null;
     }
   }
+
   if (
     typeof valor === "object" &&
     valor !== null &&
@@ -33,45 +47,61 @@ function toDate(valor: unknown): Date | null {
     const d = new Date((valor as { seconds: number }).seconds * 1000);
     return isNaN(d.getTime()) ? null : d;
   }
+
   return null;
 }
 
 function formatarData(valor: unknown, formato: string): string {
   const data = toDate(valor);
   if (!data) return "—";
+
   try {
     return format(data, formato, { locale: ptBR });
   } catch {
-    return "Data inválida";
+    return "—";
   }
 }
+
+/* ─────────────────────────────────────────────────────────────── */
 
 export default function ReceitasPage() {
   const { user, loading } = useAuthContext();
   const router = useRouter();
+
   const [receitas, setReceitas] = useState<Receita[]>([]);
   const [carregando, setCarregando] = useState(true);
 
+  /* Redireciona se não estiver logado */
   useEffect(() => {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
+  /* Carrega receitas */
   useEffect(() => {
     if (!user) return;
+
     const load = async () => {
       try {
-        // Ajuste conforme sua API — exemplo:
         const { receitas: lista } = await buscarReceitasPorPaciente("todos", 50);
-        setReceitas(lista || []);
+
+        // Proteção extra: remove receitas com datas totalmente inválidas
+        const seguras = (lista || []).map((r) => ({
+          ...r,
+          createdAt: toDate(r.createdAt),
+        }));
+
+        setReceitas(seguras);
       } catch (e) {
-        console.error(e);
+        console.error("Erro ao carregar receitas:", e);
       } finally {
         setCarregando(false);
       }
     };
+
     load();
   }, [user]);
 
+  /* Loading */
   if (loading || carregando) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -80,9 +110,12 @@ export default function ReceitasPage() {
     );
   }
 
+  /* Renderização */
   return (
     <div className="max-w-5xl mx-auto p-6">
-      <h1 className="text-2xl font-bold text-slate-900 mb-6">Histórico de Receitas</h1>
+      <h1 className="text-2xl font-bold text-slate-900 mb-6">
+        Histórico de Receitas
+      </h1>
 
       {receitas.length === 0 ? (
         <p className="text-slate-500">Nenhuma receita encontrada.</p>
@@ -96,10 +129,11 @@ export default function ReceitasPage() {
               <p className="font-medium text-slate-900">
                 Receita {receita.prescriptionId}
               </p>
+
               <p className="text-sm text-slate-500">
-                {/* AQUI ESTÁ A CORREÇÃO: usa formatarData em vez de format direto */}
                 {formatarData(receita.createdAt, "dd/MM/yyyy 'às' HH:mm")}
               </p>
+
               <div className="mt-2 flex flex-wrap gap-2">
                 {receita.medicacoes?.map((med, idx) => (
                   <span
