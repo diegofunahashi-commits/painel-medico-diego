@@ -1,6 +1,6 @@
 // ============================================================================
-// CRUD - LAUDOS + CLONAR/REPETIR ÚLTIMO
-// Baseado na coleção real: laudos/{reportId}
+// CRUD - RECEITAS + CLONAR/REPETIR ÚLTIMA
+// Baseado na coleção real: receitas/{prescriptionId}
 // ============================================================================
 
 import { db } from './firebase';
@@ -20,53 +20,53 @@ import {
   DocumentSnapshot,
   startAfter
 } from 'firebase/firestore';
-import type { Laudo } from '@/types/firestore';
+import type { Receita, MedicacaoReceita, Endereco } from '@/types/firestore';
 
-const COLLECTION = 'laudos';
+const COLLECTION = 'receitas';
 
 // ---------------------------------------------------------------------------
-// GERAR ID SEQUENCIAL (LA-0001, LA-0002...)
+// GERAR ID SEQUENCIAL (RX-0001, RX-0002...)
 // ---------------------------------------------------------------------------
-export async function gerarNovoReportId(): Promise<string> {
+export async function gerarNovoPrescriptionId(): Promise<string> {
   const snapshot = await getDocs(collection(db, COLLECTION));
   const count = snapshot.size;
-  return `LA-${String(count + 1).padStart(4, '0')}`;
+  return `RX-${String(count + 1).padStart(4, '0')}`;
 }
 
 // ---------------------------------------------------------------------------
 // CREATE
 // ---------------------------------------------------------------------------
-export async function criarLaudo(
-  dados: Omit<Laudo, 'reportId' | 'createdAt' | 'updatedAt'>
+export async function criarReceita(
+  dados: Omit<Receita, 'prescriptionId' | 'createdAt' | 'updatedAt'>
 ): Promise<string> {
-  const reportId = await gerarNovoReportId();
+  const prescriptionId = await gerarNovoPrescriptionId();
   const now = Timestamp.now();
 
-  const laudo: Laudo = {
+  const receita: Receita = {
     ...dados,
-    reportId,
+    prescriptionId,
     createdAt: now,
     updatedAt: now,
   };
 
-  await setDoc(doc(db, COLLECTION, reportId), laudo);
-  return reportId;
+  await setDoc(doc(db, COLLECTION, prescriptionId), receita);
+  return prescriptionId;
 }
 
 // ---------------------------------------------------------------------------
 // READ
 // ---------------------------------------------------------------------------
-export async function buscarLaudoPorId(reportId: string): Promise<Laudo | null> {
-  const docRef = doc(db, COLLECTION, reportId);
+export async function buscarReceitaPorId(prescriptionId: string): Promise<Receita | null> {
+  const docRef = doc(db, COLLECTION, prescriptionId);
   const snap = await getDoc(docRef);
-  return snap.exists() ? (snap.data() as Laudo) : null;
+  return snap.exists() ? (snap.data() as Receita) : null;
 }
 
-export async function buscarLaudosPorPaciente(
+export async function buscarReceitasPorPaciente(
   patientId: string,
   limiteQuantidade: number = 10,
   ultimoDoc?: DocumentSnapshot
-): Promise<{ laudos: Laudo[]; ultimoDoc?: DocumentSnapshot }> {
+): Promise<{ receitas: Receita[]; ultimoDoc?: DocumentSnapshot }> {
   const colRef = collection(db, COLLECTION);
   let q = query(
     colRef,
@@ -80,33 +80,33 @@ export async function buscarLaudosPorPaciente(
   }
 
   const snapshot = await getDocs(q);
-  const laudos: Laudo[] = [];
+  const receitas: Receita[] = [];
   let lastDoc: DocumentSnapshot | undefined;
 
   snapshot.forEach((docSnap) => {
-    laudos.push(docSnap.data() as Laudo);
+    receitas.push(docSnap.data() as Receita);
     lastDoc = docSnap;
   });
 
-  return { laudos, ultimoDoc: lastDoc };
+  return { receitas, ultimoDoc: lastDoc };
 }
 
 /**
- * Busca o último laudo do paciente
+ * Busca a última receita do paciente (mais recente)
  */
-export async function buscarUltimoLaudo(patientId: string): Promise<Laudo | null> {
-  const { laudos } = await buscarLaudosPorPaciente(patientId, 1);
-  return laudos.length > 0 ? laudos[0] : null;
+export async function buscarUltimaReceita(patientId: string): Promise<Receita | null> {
+  const { receitas } = await buscarReceitasPorPaciente(patientId, 1);
+  return receitas.length > 0 ? receitas[0] : null;
 }
 
 // ---------------------------------------------------------------------------
 // UPDATE
 // ---------------------------------------------------------------------------
-export async function atualizarLaudo(
-  reportId: string,
-  dados: Partial<Laudo>
+export async function atualizarReceita(
+  prescriptionId: string,
+  dados: Partial<Receita>
 ): Promise<void> {
-  const docRef = doc(db, COLLECTION, reportId);
+  const docRef = doc(db, COLLECTION, prescriptionId);
   await updateDoc(docRef, {
     ...dados,
     updatedAt: Timestamp.now(),
@@ -116,76 +116,99 @@ export async function atualizarLaudo(
 // ---------------------------------------------------------------------------
 // DELETE
 // ---------------------------------------------------------------------------
-export async function excluirLaudo(reportId: string): Promise<void> {
-  await deleteDoc(doc(db, COLLECTION, reportId));
+export async function excluirReceita(prescriptionId: string): Promise<void> {
+  await deleteDoc(doc(db, COLLECTION, prescriptionId));
 }
 
 // ============================================================================
-// CLONAR / REPETIR ÚLTIMO LAUDO (PREENCHIMENTO AUTOMÁTICO)
+// CLONAR / REPETIR ÚLTIMA RECEITA (PREENCHIMENTO AUTOMÁTICO)
 // ============================================================================
 
 /**
- * Clona o último laudo do paciente, mantendo o texto mas permitindo edição.
+ * Clona a última receita do paciente, atualizando a data para hoje.
  * Retorna os dados prontos para preencher o formulário (SEM salvar no banco).
  */
-export async function clonarUltimoLaudo(
+export async function clonarUltimaReceita(
   patientId: string,
   doctorUid: string
-): Promise<Omit<Laudo, 'reportId' | 'createdAt' | 'updatedAt'> | null> {
-  const ultimo = await buscarUltimoLaudo(patientId);
-  if (!ultimo) return null;
+): Promise<Omit<Receita, 'prescriptionId' | 'createdAt' | 'updatedAt'> | null> {
+  const ultima = await buscarUltimaReceita(patientId);
+  if (!ultima) return null;
 
-  const { reportId, createdAt, updatedAt, ...dadosClonaveis } = ultimo;
+  // Clona tudo MENOS prescriptionId, createdAt, updatedAt
+  const { prescriptionId, createdAt, updatedAt, ...dadosClonaveis } = ultima;
 
+  // Atualiza o doctorUid (pode ser o mesmo médico ou outro)
   return {
     ...dadosClonaveis,
     doctorUid,
-    status: 'draft', // Sempre começa como rascunho
+    // Mantém os mesmos medicamentos, endereço, cpf, idade, peso
+    // O médico pode editar antes de salvar
   };
 }
 
 /**
- * Clona um laudo específico pelo ID
+ * Clona uma receita específica pelo ID
  */
-export async function clonarLaudoPorId(
-  reportId: string,
+export async function clonarReceitaPorId(
+  prescriptionId: string,
   doctorUid: string
-): Promise<Omit<Laudo, 'reportId' | 'createdAt' | 'updatedAt'> | null> {
-  const laudo = await buscarLaudoPorId(reportId);
-  if (!laudo) return null;
+): Promise<Omit<Receita, 'prescriptionId' | 'createdAt' | 'updatedAt'> | null> {
+  const receita = await buscarReceitaPorId(prescriptionId);
+  if (!receita) return null;
 
-  const { reportId: _, createdAt, updatedAt, ...dadosClonaveis } = laudo;
+  const { prescriptionId: _, createdAt, updatedAt, ...dadosClonaveis } = receita;
 
   return {
     ...dadosClonaveis,
     doctorUid,
-    status: 'draft',
   };
 }
 
 /**
- * Prepara dados de laudo a partir do paciente atual
+ * Prepara dados de receita a partir do paciente atual
  * Usado quando NÃO há histórico para clonar
  */
-export function prepararLaudoDoPaciente(
-  patient: { 
-    patientID: string; 
-    idade: string; 
-    'data de nascimento': Timestamp; 
-  },
-  doctorUid: string,
-  appointmentId: string = ''
-): Omit<Laudo, 'reportId' | 'createdAt' | 'updatedAt'> {
+export function prepararReceitaDoPaciente(
+  patient: { patientID: string; 'nome completo': string; cpf: string; idade: string; peso: string; endereco: Endereco },
+  doctorUid: string
+): Omit<Receita, 'prescriptionId' | 'createdAt' | 'updatedAt'> {
   return {
     patientId: patient.patientID,
-    idade: patient.idade,
-    'data de nascimento': patient['data de nascimento'],
-    appointmentId,
     doctorUid,
-    cidCodes: [],
-    diagnosisIds: [],
-    textoLaudo: '',
-    status: 'draft',
-    'informacoes adiconais': '',
+    endereco: patient.endereco,
+    cpf: patient.cpf,
+    idade: patient.idade,
+    peso: patient.peso,
+    medicacoes: [],
   };
+}
+
+// ============================================================================
+// BUSCA GLOBAL POR PERÍODO — Dashboard e relatórios
+// ============================================================================
+
+/**
+ * Busca TODAS as receitas criadas dentro de um período (global, não por paciente).
+ * Ideal para dashboards e relatórios.
+ * REQUER ÍNDICE no Firestore: createdAt (descendente)
+ */
+export async function buscarReceitasPorPeriodo(
+  dataInicio: Date,
+  dataFim: Date
+): Promise<Receita[]> {
+  const colRef = collection(db, COLLECTION);
+  const q = query(
+    colRef,
+    where('createdAt', '>=', Timestamp.fromDate(dataInicio)),
+    where('createdAt', '<=', Timestamp.fromDate(dataFim)),
+    orderBy('createdAt', 'desc')
+  );
+
+  const snapshot = await getDocs(q);
+  const receitas: Receita[] = [];
+  snapshot.forEach((docSnap) => {
+    receitas.push(docSnap.data() as Receita);
+  });
+  return receitas;
 }

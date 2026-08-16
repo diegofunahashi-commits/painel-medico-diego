@@ -183,3 +183,32 @@ export function prepararReceitaDoPaciente(
     medicacoes: [],
   };
 }
+
+// ============================================================================
+// BUSCA GLOBAL POR PERÍODO — Dashboard e relatórios
+// ============================================================================
+
+/**
+ * Busca TODAS as receitas criadas dentro de um período (global, não por paciente).
+ * Ideal para dashboards e relatórios.
+ * REQUER ÍNDICE no Firestore: createdAt (descendente)
+ */
+export async function buscarReceitasPorPeriodo(
+  dataInicio: Date,
+  dataFim: Date
+): Promise<Receita[]> {
+  const colRef = collection(db, COLLECTION);
+  const q = query(
+    colRef,
+    where('createdAt', '>=', Timestamp.fromDate(dataInicio)),
+    where('createdAt', '<=', Timestamp.fromDate(dataFim)),
+    orderBy('createdAt', 'desc')
+  );
+
+  const snapshot = await getDocs(q);
+  const receitas: Receita[] = [];
+  snapshot.forEach((docSnap) => {
+    receitas.push(docSnap.data() as Receita);
+  });
+  return receitas;
+}

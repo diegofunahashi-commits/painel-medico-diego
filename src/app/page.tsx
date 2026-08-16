@@ -1,529 +1,473 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useAuthContext } from '@/components/AuthProvider';
-import { buscarReceitasPorPaciente, excluirReceita } from '@/lib/receitas';
-import type { Receita } from '@/types/firestore';
-import { FileText, Clock, Repeat, Trash2, Download, ChevronRight } from 'lucide-react';
-import toast from 'react-hot-toast';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
-
-interface HistoricoReceitasProps {
-  patientId: string;
-  onClonarReceita: (receita: Receita) => void;
-  onNovaReceita: () => void;
-}
-
-/* ============================================================
-   HELPERS DEFENSIVOS — cobrem TODOS os formatos do Firestore
-   ============================================================ */
-
-function toDate(valor: unknown): Date | null {
-  if (!valor) return null;
-  if (valor instanceof Date) return isNaN(valor.getTime()) ? null : valor;
-  if (typeof valor === 'string' || typeof valor === 'number') {
-    const d = new Date(valor);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  // Firestore Timestamp com .toDate()
-  const possivelTimestamp = valor as { toDate?: () => Date };
-  if (typeof possivelTimestamp.toDate === 'function') {
-    try {
-      const d = possivelTimestamp.toDate();
-      return d instanceof Date && !isNaN(d.getTime()) ? d : null;
-    } catch {
-      return null;
-    }
-  }
-  // Firestore plain object { seconds, nanoseconds }
-  const possivelObj = valor as { seconds?: number; nanoseconds?: number };
-  if (typeof possivelObj.seconds === 'number') {
-    const d = new Date(possivelObj.seconds * 1000);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  return null;
-}
-
-function formatarData(valor: unknown, formato: string): string {
-  const data = toDate(valor);
-  if (!data) return 'Data não disponível';
-  try {
-    return format(data, formato, { locale: ptBR });
-  } catch {
-    return 'Data inválida';
-  }
-}
-
-function safeArray<T>(val: unknown): T[] {
-  if (Array.isArray(val)) return val;
-  return [];
-}
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAuthContext } from "@/components/AuthProvider";
+import { buscarTodosPacientes } from "@/lib/pacientes";
+import { buscarAgendamentosDoDia } from "@/lib/agendamentos";
+import { buscarReceitasPorPeriodo } from "@/lib/receitas";
+import { buscarLaudosPorPeriodo } from "@/lib/laudos";
+import type { Patient, Agendamento } from "@/types/firestore";
+import Link from "next/link";
+import {
+  Users,
+  Calendar,
+  FileText,
+  TrendingUp,
+  Clock,
+  ArrowRight,
+  Plus,
+  AlertCircle,
+  Stethoscope,
+} from "lucide-react";
+import { format, startOfMonth, endOfMonth } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 /* ============================================================
-   COMPONENTE
+   DASHBOARD OTIMIZADO — Busca global por período (sem N+1)
+   Dr. Diego Funahashi — Neurodesenvolvimento Infantil
    ============================================================ */
 
-export default function HistoricoReceitas({
-  patientId,
-  onClonarReceita,
-  onNovaReceita,
-}: HistoricoReceitasProps) {
-  const { user } = useAuthContext();
-  const [receitas, setReceitas] = useState<Receita[]>([]);
+interface Stats {
+  pacientes: number;
+  consultasHoje: number;
+  receitasMes: number;
+  laudosMes: number;
+}
+
+interface ConsultaHoje {
+  appointmentId: string;
+  pacienteNome: string;
+  horario: string;
+  tipo: string;
+  status: string;
+}
+
+export default function DashboardPage() {
+  const { user, loading: authLoading } = useAuthContext();
+  const router = useRouter();
+
+  const [stats, setStats] = useState<Stats>({
+    pacientes: 0,
+    consultasHoje: 0,
+    receitasMes: 0,
+    laudosMes: 0,
+  });
+  const [pacientesRecentes, setPacientesRecentes] = useState<Patient[]>([]);
+  const [consultasHoje, setConsultasHoje] = useState<ConsultaHoje[]>([]);
   const [carregando, setCarregando] = useState(true);
-  const [receitaSelecionada, setReceitaSelecionada] = useState<Receita | null>(null);
-  const [gerandoPdf, setGerandoPdf] = useState<string | null>(null);
-  const pdfRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [erros, setErros] = useState<string[]>([]);
 
+  /* ── Redireciona se não estiver logado ── */
   useEffect(() => {
-    if (!patientId) return;
-    carregarReceitas();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patientId]);
-
-  const carregarReceitas = async () => {
-    setCarregando(true);
-    try {
-      const { receitas: lista } = await buscarReceitasPorPaciente(patientId, 20);
-      setReceitas(Array.isArray(lista) ? lista : []);
-    } catch (error) {
-      console.error(error);
-      toast.error('Erro ao carregar receitas');
-    } finally {
-      setCarregando(false);
+    if (!authLoading && !user) {
+      router.push("/login");
     }
-  };
+  }, [user, authLoading, router]);
 
-  const handleClonar = (receita: Receita) => {
-    onClonarReceita(receita);
-    toast.success('Receita carregada como modelo!');
-  };
+  /* ── Busca todos os dados em paralelo ── */
+  useEffect(() => {
+    if (!user || authLoading) return;
 
-  const handleExcluir = async (prescriptionId: string) => {
-    if (!confirm('Tem certeza que deseja excluir esta receita?')) return;
-    try {
-      await excluirReceita(prescriptionId);
-      toast.success('Receita excluída');
-      carregarReceitas();
-    } catch {
-      toast.error('Erro ao excluir');
-    }
-  };
+    let cancelado = false;
 
-  const handleGerarPDF = async (receita: Receita) => {
-    if (typeof window === 'undefined') return;
-    const el = pdfRefs.current[receita.prescriptionId];
-    if (!el) {
-      toast.error('Erro ao gerar PDF');
-      return;
-    }
-    setGerandoPdf(receita.prescriptionId);
-    try {
-      const html2pdf = (await import('html2pdf.js')).default;
-      const opt = {
-        margin: [10, 10, 10, 10],
-        filename: `Receita_${receita.prescriptionId}_${formatarData(receita.createdAt, 'dd-MM-yyyy')}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      };
-      await html2pdf().set(opt).from(el).save();
-      toast.success('PDF baixado!');
-    } catch (e) {
-      console.error(e);
-      toast.error('Erro ao gerar PDF');
-    } finally {
-      setGerandoPdf(null);
-    }
-  };
+    const carregarDados = async () => {
+      setCarregando(true);
+      setErros([]);
+      const novosErros: string[] = [];
 
-  /* CORREÇÃO CRÍTICA: ref callback memoizado para evitar re-render loop */
-  const setPdfRef = useCallback(
-    (prescriptionId: string) => (el: HTMLDivElement | null) => {
-      pdfRefs.current[prescriptionId] = el;
-    },
-    []
-  );
+      try {
+        const hoje = new Date();
+        const inicioMes = startOfMonth(hoje);
+        const fimMes = endOfMonth(hoje);
 
-  if (carregando) {
+        /* 1. Pacientes recentes + Agendamentos de hoje (paralelo) */
+        const [pacientesResult, agendamentos] = await Promise.allSettled([
+          buscarTodosPacientes(5),
+          buscarAgendamentosDoDia(user.uid, hoje),
+        ]);
+
+        let pacientes: Patient[] = [];
+        if (pacientesResult.status === "fulfilled") {
+          pacientes = pacientesResult.value.pacientes;
+          if (!cancelado) setPacientesRecentes(pacientes);
+        } else {
+          console.error("[Dashboard] Erro pacientes:", pacientesResult.reason);
+          novosErros.push("Erro ao carregar pacientes.");
+        }
+
+        /* 2. Monta lista de consultas de hoje */
+        if (agendamentos.status === "fulfilled") {
+          const pacientesMap = new Map<string, Patient>();
+          pacientes.forEach((p) => {
+            if (p.patientID) pacientesMap.set(p.patientID, p);
+          });
+
+          const consultasFormatadas: ConsultaHoje[] = agendamentos.value.map((a) => {
+            const paciente = pacientesMap.get(a.patientId);
+            const nome = paciente?.["nome completo"] || paciente?.nome || "Paciente";
+
+            let horario = "--:--";
+            try {
+              const dh = a.dataHora;
+              if (dh && typeof dh === "object" && "toDate" in dh) {
+                horario = format(dh.toDate(), "HH:mm");
+              } else if (dh) {
+                horario = format(new Date(dh as any), "HH:mm");
+              }
+            } catch {
+              horario = "--:--";
+            }
+
+            return {
+              appointmentId: a.appointmentId || String(Math.random()),
+              pacienteNome: nome,
+              horario,
+              tipo: a.tipo || a.tipoConsulta || "Consulta",
+              status: a.status || "agendada",
+            };
+          });
+
+          consultasFormatadas.sort((a, b) => a.horario.localeCompare(b.horario));
+          if (!cancelado) setConsultasHoje(consultasFormatadas);
+        } else {
+          console.error("[Dashboard] Erro agendamentos:", agendamentos.reason);
+          novosErros.push("Erro ao carregar agendamentos de hoje.");
+        }
+
+        /* 3. Receitas e Laudos do mês (paralelo, busca global) */
+        const [receitasResult, laudosResult] = await Promise.allSettled([
+          buscarReceitasPorPeriodo(inicioMes, fimMes),
+          buscarLaudosPorPeriodo(inicioMes, fimMes),
+        ]);
+
+        let totalReceitasMes = 0;
+        if (receitasResult.status === "fulfilled") {
+          totalReceitasMes = receitasResult.value.length;
+        } else {
+          console.error("[Dashboard] Erro receitas:", receitasResult.reason);
+          novosErros.push("Erro ao contar receitas do mês.");
+        }
+
+        let totalLaudosMes = 0;
+        if (laudosResult.status === "fulfilled") {
+          totalLaudosMes = laudosResult.value.length;
+        } else {
+          console.error("[Dashboard] Erro laudos:", laudosResult.reason);
+          novosErros.push("Erro ao contar laudos do mês.");
+        }
+
+        if (!cancelado) {
+          setStats({
+            pacientes: pacientes.length,
+            consultasHoje: agendamentos.status === "fulfilled" ? agendamentos.value.length : 0,
+            receitasMes: totalReceitasMes,
+            laudosMes: totalLaudosMes,
+          });
+          if (novosErros.length > 0) setErros(novosErros);
+        }
+      } catch (e) {
+        console.error("[Dashboard] Erro geral:", e);
+        if (!cancelado) {
+          setErros(["Erro ao carregar dados do dashboard. Tente recarregar a página."]);
+        }
+      } finally {
+        if (!cancelado) setCarregando(false);
+      }
+    };
+
+    carregarDados();
+
+    return () => {
+      cancelado = true;
+    };
+  }, [user, authLoading]);
+
+  /* ── Loading ── */
+  if (authLoading || carregando) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-medical-600" />
+      <div className="flex items-center justify-center h-96">
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-medical-600" />
+          <p className="text-sm text-slate-500">Carregando dashboard...</p>
+        </div>
       </div>
     );
   }
 
+  if (!user) return null;
+
+  const hoje = new Date();
+
+  const statusConfig: Record<string, { label: string; className: string }> = {
+    agendada: { label: "Agendada", className: "bg-blue-50 text-blue-700 border-blue-200" },
+    confirmada: { label: "Confirmada", className: "bg-green-50 text-green-700 border-green-200" },
+    em_andamento: { label: "Em andamento", className: "bg-amber-50 text-amber-700 border-amber-200" },
+    concluida: { label: "Concluída", className: "bg-green-50 text-green-700 border-green-200" },
+    cancelada: { label: "Cancelada", className: "bg-red-50 text-red-700 border-red-200" },
+    default: { label: "Agendada", className: "bg-slate-50 text-slate-600 border-slate-200" },
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900">Receitas Médicas</h3>
-          <p className="text-sm text-slate-500">{receitas.length} receita(s) no histórico</p>
+          <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
+          <p className="text-slate-500">
+            {format(hoje, "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR })}
+          </p>
         </div>
-        <div className="flex gap-2">
-          {receitas.length > 0 && (
-            <button
-              onClick={() => handleClonar(receitas[0])}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition border border-amber-200"
+        <Link
+          href="/pacientes/novo"
+          className="flex items-center gap-2 px-4 py-2 bg-medical-600 text-white rounded-lg hover:bg-medical-700 transition text-sm font-medium"
+        >
+          <Plus size={16} />
+          Novo Paciente
+        </Link>
+      </div>
+
+      {/* Alertas de erro */}
+      {erros.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={18} className="text-amber-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-amber-800">
+                Alguns dados não puderam ser carregados:
+              </p>
+              <ul className="mt-1 space-y-1">
+                {erros.map((err, i) => (
+                  <li key={i} className="text-xs text-amber-700">
+                    • {err}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cards de stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Pacientes"
+          value={stats.pacientes}
+          icon={<Users size={20} />}
+          color="medical"
+        />
+        <StatCard
+          label="Consultas Hoje"
+          value={stats.consultasHoje}
+          icon={<Calendar size={20} />}
+          color="green"
+        />
+        <StatCard
+          label="Receitas (mês)"
+          value={stats.receitasMes}
+          icon={<FileText size={20} />}
+          color="amber"
+        />
+        <StatCard
+          label="Laudos (mês)"
+          value={stats.laudosMes}
+          icon={<TrendingUp size={20} />}
+          color="purple"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Pacientes recentes */}
+        <div className="bg-white border border-slate-200 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-slate-900">Pacientes Recentes</h2>
+            <Link
+              href="/pacientes"
+              className="text-sm text-medical-600 hover:text-medical-700 font-medium flex items-center gap-1"
             >
-              <Repeat size={16} />
-              <span className="text-sm font-medium">Repetir última</span>
-            </button>
-          )}
-          <button
-            onClick={onNovaReceita}
-            className="flex items-center gap-2 px-4 py-2 bg-medical-600 text-white rounded-lg hover:bg-medical-700 transition"
-          >
-            <FileText size={16} />
-            <span className="text-sm font-medium">Nova Receita</span>
-          </button>
+              Ver todos <ArrowRight size={14} />
+            </Link>
+          </div>
+          <div className="space-y-2">
+            {pacientesRecentes.map((p) => {
+              const nome = p["nome completo"] || p.nome || "Sem nome";
+              const idade = p.idade || "-";
+              const localizacao = p.localizacao || p.cidade || "-";
+              return (
+                <Link
+                  key={p.patientID || p.id || Math.random()}
+                  href={`/pacientes/${p.patientID || p.id}`}
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 transition"
+                >
+                  <div className="w-9 h-9 rounded-full bg-medical-100 flex items-center justify-center text-medical-600 text-sm font-bold shrink-0">
+                    {nome.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-900 truncate">{nome}</p>
+                    <p className="text-xs text-slate-500">
+                      {idade} {typeof idade === "number" ? "anos" : ""} • {localizacao}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
+            {pacientesRecentes.length === 0 && (
+              <p className="text-sm text-slate-400 text-center py-6">
+                Nenhum paciente cadastrado
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Consultas de hoje */}
+        <div className="bg-white border border-slate-200 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-slate-900">Consultas de Hoje</h2>
+            <span className="text-xs font-medium px-2 py-1 bg-medical-50 text-medical-700 rounded-full">
+              {consultasHoje.length} agendada{consultasHoje.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {consultasHoje.length > 0 ? (
+              consultasHoje.map((c) => {
+                const status = statusConfig[c.status] || statusConfig.default;
+                return (
+                  <div
+                    key={c.appointmentId}
+                    className="flex items-center gap-3 p-3 rounded-lg bg-slate-50"
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-medical-100 flex items-center justify-center text-medical-600 text-xs font-bold shrink-0">
+                      {c.horario}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-900 truncate">
+                        {c.pacienteNome}
+                      </p>
+                      <p className="text-xs text-slate-500">{c.tipo}</p>
+                    </div>
+                    <span
+                      className={`text-xs font-medium px-2 py-0.5 rounded-full border ${status.className}`}
+                    >
+                      {status.label}
+                    </span>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="text-center py-8">
+                <Calendar size={32} className="mx-auto text-slate-300 mb-2" />
+                <p className="text-sm text-slate-400">
+                  Nenhuma consulta agendada para hoje
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {receitas.length === 0 ? (
-        <div className="text-center py-12 bg-slate-50 rounded-xl border border-slate-200">
-          <FileText size={48} className="mx-auto text-slate-300 mb-4" />
-          <p className="text-slate-500">Nenhuma receita encontrada</p>
-          <button
-            onClick={onNovaReceita}
-            className="mt-4 text-medical-600 hover:text-medical-700 font-medium text-sm"
-          >
-            Criar primeira receita →
-          </button>
+      {/* Ações rápidas */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6">
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">Ações Rápidas</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <QuickAction
+            href="/pacientes/novo"
+            icon={<Users size={22} />}
+            label="Novo Paciente"
+            color="medical"
+          />
+          <QuickAction
+            href="/pacientes"
+            icon={<Stethoscope size={22} />}
+            label="Ver Pacientes"
+            color="green"
+          />
+          <QuickAction
+            href="/configuracoes"
+            icon={<FileText size={22} />}
+            label="Configurar"
+            color="amber"
+          />
+          <QuickAction
+            href="/configuracoes"
+            icon={<Clock size={22} />}
+            label="Relatórios"
+            color="slate"
+          />
         </div>
-      ) : (
-        <div className="space-y-3">
-          {receitas.map((receita) => {
-            const medicacoes = safeArray(receita.medicacoes);
-            return (
-              <div key={receita.prescriptionId}>
-                {/* Card visível */}
-                <div
-                  className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md transition cursor-pointer group"
-                  onClick={() =>
-                    setReceitaSelecionada(
-                      receitaSelecionada?.prescriptionId === receita.prescriptionId
-                        ? null
-                        : receita
-                    )
-                  }
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-medical-100 flex items-center justify-center text-medical-600">
-                          <FileText size={18} />
-                        </div>
-                        <div>
-                          <p className="font-medium text-slate-900">
-                            Receita {receita.prescriptionId}
-                          </p>
-                          <p className="text-sm text-slate-500 flex items-center gap-1">
-                            <Clock size={12} />
-                            {formatarData(receita.createdAt, "dd/MM/yyyy 'às' HH:mm")}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {medicacoes.map((med, idx) => (
-                          <span
-                            key={idx}
-                            className="px-2 py-1 bg-slate-100 text-slate-700 text-xs rounded-md font-medium"
-                          >
-                            {med.nome ?? 'Medicamento'}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleClonar(receita);
-                        }}
-                        className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition"
-                        title="Usar como modelo"
-                      >
-                        <Repeat size={16} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleGerarPDF(receita);
-                        }}
-                        disabled={gerandoPdf === receita.prescriptionId}
-                        className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition disabled:opacity-50"
-                        title="Baixar PDF"
-                      >
-                        {gerandoPdf === receita.prescriptionId ? (
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600" />
-                        ) : (
-                          <Download size={16} />
-                        )}
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleExcluir(receita.prescriptionId);
-                        }}
-                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                        title="Excluir"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                      <ChevronRight
-                        size={16}
-                        className={`text-slate-400 transition-transform ${
-                          receitaSelecionada?.prescriptionId === receita.prescriptionId
-                            ? 'rotate-90'
-                            : ''
-                        }`}
-                      />
-                    </div>
-                  </div>
-
-                  {receitaSelecionada?.prescriptionId === receita.prescriptionId && (
-                    <div className="mt-4 pt-4 border-t border-slate-100">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-xs font-medium text-slate-500 uppercase mb-2">
-                            Medicamentos
-                          </p>
-                          <div className="space-y-2">
-                            {medicacoes.map((med, idx) => (
-                              <div key={idx} className="bg-slate-50 p-3 rounded-lg">
-                                <p className="font-medium text-slate-800">
-                                  {med.nome ?? 'Medicamento'}
-                                </p>
-                                <p className="text-sm text-slate-600">{med.dose ?? '-'}</p>
-                                <p className="text-sm text-slate-500">
-                                  {med.via ?? '-'} — {med.frequencia ?? '-'}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-slate-500 uppercase mb-2">
-                            Dados do Paciente na Época
-                          </p>
-                          <div className="space-y-1 text-sm text-slate-600">
-                            <p>
-                              <span className="font-medium">Idade:</span> {receita.idade ?? '-'}
-                            </p>
-                            <p>
-                              <span className="font-medium">Peso:</span>{' '}
-                              {receita.peso ? `${receita.peso} kg` : '-'}
-                            </p>
-                            <p>
-                              <span className="font-medium">CPF:</span> {receita.cpf ?? '-'}
-                            </p>
-                            <p>
-                              <span className="font-medium">Endereço:</span>{' '}
-                              {receita.endereco
-                                ? `${receita.endereco.rua ?? ''}, ${receita.endereco.numero ?? ''} — ${
-                                    receita.endereco.cidade ?? ''
-                                  }`
-                                : '-'}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Template oculto para PDF */}
-                <div
-                  ref={setPdfRef(receita.prescriptionId)}
-                  style={{ position: 'absolute', left: '-9999px', top: 0 }}
-                >
-                  <div
-                    style={{
-                      width: '210mm',
-                      minHeight: '297mm',
-                      padding: '20mm',
-                      fontFamily: 'Arial, sans-serif',
-                      background: '#fff',
-                      color: '#000',
-                    }}
-                  >
-                    {/* Cabeçalho */}
-                    <div
-                      style={{
-                        textAlign: 'center',
-                        borderBottom: '2px solid #0ea5e9',
-                        paddingBottom: '16px',
-                        marginBottom: '24px',
-                      }}
-                    >
-                      <h1 style={{ fontSize: '22px', fontWeight: 'bold', color: '#0c4a6e', margin: 0 }}>
-                        DR. DIEGO FUNAHASHI
-                      </h1>
-                      <p style={{ fontSize: '13px', color: '#475569', margin: '4px 0 0 0' }}>
-                        Médico — CRM: [Número]
-                      </p>
-                      <p style={{ fontSize: '12px', color: '#64748b', margin: '2px 0 0 0' }}>
-                        Neurodesenvolvimento Infantil
-                      </p>
-                    </div>
-
-                    {/* Título */}
-                    <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-                      <h2
-                        style={{
-                          fontSize: '18px',
-                          fontWeight: 'bold',
-                          textTransform: 'uppercase',
-                          letterSpacing: '2px',
-                          margin: 0,
-                        }}
-                      >
-                        Receituário Médico
-                      </h2>
-                      <p style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                        {formatarData(receita.createdAt, "dd 'de' MMMM 'de' yyyy")}
-                      </p>
-                    </div>
-
-                    {/* Dados do paciente */}
-                    <div
-                      style={{
-                        border: '1px solid #e2e8f0',
-                        borderRadius: '8px',
-                        padding: '16px',
-                        marginBottom: '24px',
-                      }}
-                    >
-                      <h3
-                        style={{
-                          fontSize: '13px',
-                          fontWeight: 'bold',
-                          color: '#0c4a6e',
-                          marginBottom: '12px',
-                          textTransform: 'uppercase',
-                        }}
-                      >
-                        Dados do Paciente
-                      </h3>
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: '1fr 1fr',
-                          gap: '8px',
-                          fontSize: '13px',
-                        }}
-                      >
-                        <p>
-                          <strong>Nome:</strong> {receita.patientId ?? 'Paciente'}
-                        </p>
-                        <p>
-                          <strong>CPF:</strong> {receita.cpf ?? '-'}
-                        </p>
-                        <p>
-                          <strong>Idade:</strong> {receita.idade ?? '-'} anos
-                        </p>
-                        <p>
-                          <strong>Peso:</strong>{' '}
-                          {receita.peso ? `${receita.peso} kg` : '-'}
-                        </p>
-                        <p style={{ gridColumn: '1 / -1' }}>
-                          <strong>Endereço:</strong>{' '}
-                          {receita.endereco
-                            ? `${receita.endereco.rua ?? ''}, ${receita.endereco.numero ?? ''}, ${
-                                receita.endereco.bairro ?? ''
-                              }, ${receita.endereco.cidade ?? ''}`
-                            : '-'}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Medicamentos */}
-                    <div style={{ marginBottom: '32px' }}>
-                      <h3
-                        style={{
-                          fontSize: '13px',
-                          fontWeight: 'bold',
-                          color: '#0c4a6e',
-                          marginBottom: '16px',
-                          textTransform: 'uppercase',
-                        }}
-                      >
-                        Prescrição
-                      </h3>
-                      {medicacoes.map((med, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            border: '1px solid #e2e8f0',
-                            borderRadius: '8px',
-                            padding: '16px',
-                            marginBottom: '12px',
-                          }}
-                        >
-                          <p style={{ fontSize: '15px', fontWeight: 'bold', margin: '0 0 8px 0' }}>
-                            {idx + 1}. {med.nome ?? 'Medicamento'}
-                          </p>
-                          <p style={{ fontSize: '13px', margin: '4px 0', color: '#334155' }}>
-                            <strong>Dose:</strong> {med.dose ?? '-'}
-                          </p>
-                          <p style={{ fontSize: '13px', margin: '4px 0', color: '#334155' }}>
-                            <strong>Via:</strong> {med.via ?? '-'}
-                          </p>
-                          <p style={{ fontSize: '13px', margin: '4px 0', color: '#334155' }}>
-                            <strong>Frequência:</strong> {med.frequencia ?? '-'}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Assinatura */}
-                    <div style={{ marginTop: '48px', textAlign: 'center' }}>
-                      <div
-                        style={{
-                          borderTop: '1px solid #000',
-                          width: '250px',
-                          margin: '0 auto',
-                          paddingTop: '8px',
-                        }}
-                      >
-                        <p style={{ fontSize: '14px', fontWeight: 'bold', margin: 0 }}>
-                          Dr. Diego Funahashi
-                        </p>
-                        <p style={{ fontSize: '12px', color: '#64748b', margin: '4px 0 0 0' }}>
-                          CRM: [Número] — Médico
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Rodapé */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        bottom: '20mm',
-                        left: '20mm',
-                        right: '20mm',
-                        textAlign: 'center',
-                        fontSize: '10px',
-                        color: '#94a3b8',
-                        borderTop: '1px solid #e2e8f0',
-                        paddingTop: '8px',
-                      }}
-                    >
-                      <p>
-                        Documento gerado eletronicamente —{' '}
-                        {formatarData(receita.createdAt, "dd/MM/yyyy 'às' HH:mm")}
-                      </p>
-                      <p>ID: {receita.prescriptionId}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      </div>
     </div>
+  );
+}
+
+/* ============================================================
+   SUBCOMPONENTES
+   ============================================================ */
+
+function StatCard({
+  label,
+  value,
+  icon,
+  color,
+}: {
+  label: string;
+  value: number;
+  icon: React.ReactNode;
+  color: "medical" | "green" | "amber" | "purple" | "slate";
+}) {
+  const colorMap = {
+    medical: { bg: "bg-medical-100", text: "text-medical-600" },
+    green: { bg: "bg-green-100", text: "text-green-600" },
+    amber: { bg: "bg-amber-100", text: "text-amber-600" },
+    purple: { bg: "bg-purple-100", text: "text-purple-600" },
+    slate: { bg: "bg-slate-100", text: "text-slate-600" },
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-sm transition">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-slate-500">{label}</p>
+          <p className="text-2xl font-bold text-slate-900">{value}</p>
+        </div>
+        <div
+          className={`w-10 h-10 rounded-lg ${colorMap[color].bg} flex items-center justify-center ${colorMap[color].text}`}
+        >
+          {icon}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuickAction({
+  href,
+  icon,
+  label,
+  color,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+  color: "medical" | "green" | "amber" | "slate";
+}) {
+  const colorMap = {
+    medical:
+      "bg-medical-50 border-medical-100 text-medical-700 hover:bg-medical-100",
+    green:
+      "bg-green-50 border-green-100 text-green-700 hover:bg-green-100",
+    amber:
+      "bg-amber-50 border-amber-100 text-amber-700 hover:bg-amber-100",
+    slate:
+      "bg-slate-50 border-slate-100 text-slate-600 hover:bg-slate-100",
+  };
+
+  return (
+    <Link
+      href={href}
+      className={`flex flex-col items-center gap-2 p-4 rounded-xl border transition ${colorMap[color]}`}
+    >
+      {icon}
+      <span className="text-sm font-medium">{label}</span>
+    </Link>
   );
 }
